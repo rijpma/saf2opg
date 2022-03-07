@@ -7,35 +7,13 @@ library("stringi")
 options(sd_num_thread = 8)
 setDTthreads(8)
 
-# setwd("~/data/cape/opgaafrol/")
+# setwd("~/data/cape/opg/")
 
 saf = fread("../saf4spouselinkage_full_clean.csv",
     na.string = "")
 
-rein = fread(cmd = "gunzip -c opgaafrol_rein_linked_20200825.csv.gz", 
-    colClasses = "character", na.string = "")
-stel = fread(cmd = "gunzip -c opgaafrol_stel_linked_20200825.csv.gz", 
-    colClasses = "character", na.string = "")
-cape = fread(cmd = "gunzip -c opgaafrol_cape_linked_20200825.csv.gz", 
-    colClasses = "character", na.string = "")
-tulb = fread(cmd = "gunzip -c opgaafrol_tulb_linked_20200825.csv.gz", 
-    colClasses = "character", na.string = "")
-swel = fread(cmd = "gunzip -c opgaafrol_swel_linked_20200825.csv.gz", 
-    colClasses = "character", na.string = "")
-
-# actually this should be done in the script that created opgaafrol_rein_linked_20200825.csv.gz
-# (was fixed for training data, but merged back in later...)
-rein[, lastnamemen := gsub('\x86', 'U', lastnamemen)]
-rein[, lastnamemen := gsub('\x83', 'E', lastnamemen)]
-rein[, lastnamewomen := gsub('\x83', 'E', lastnamewomen)]
-
-opg = rbindlist(
-    list(rein = rein, 
-        stel = stel, 
-        cape = cape, 
-        tulb = tulb, 
-        swel = swel), 
-    fill = TRUE, idcol = "rol")
+opg = fread("gunzip -c ../opgaafrol_all_linked_20220220.csv.gz",
+    na.string = "")
 
 opg[, persid := stri_join(rol, "_", persid)]
 opg[, idx := stri_join(rol, "_", index)]
