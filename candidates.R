@@ -58,7 +58,7 @@ opg = rapply(opg, tolower, classes = "character", how = "replace")
 # nb that usually, but not always the man is the mlast
 fill = list()
 
-for (i in 1750:1820){
+for (i in 1700:1824){
     gc()
     tolink = saf[sy == i & gender == 1, 
                 list(
@@ -93,7 +93,7 @@ for (i in 1750:1820){
 gc()
 cnd = rbindlist(fill, id = "linkvariable")
 gc()
-fwrite(cnd, "saf2opg_candidates_1750_1820.csv")
+fwrite(cnd, "saf2opg_candidates_1700_1824.csv")
 
 # candidates for training data
 

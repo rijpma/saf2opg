@@ -17,7 +17,8 @@ setDTthreads(8)
 
 # cnd = fread("~/data/cape/saf/saf_couples_candidates_full.csv", na.strings = "")
 # cnd = fread("~/data/cape/saf/saf/saf2opg_candidates_1750_1820.csv", na.strings = "")
-cnd = fread("saf2opg_candidates_1750_1820.csv", na.strings = "")
+# cnd = fread("saf2opg_candidates_1750_1820.csv", na.strings = "")
+cnd = fread("saf2opg_candidates_1700_1824.csv", na.strings = "")
 
 cnd[, mfirstdist := stringdist::stringdist(firstnames, mfirst, method = "jw")]
 cnd[, mlastdist := stringdist::stringdist(surname, mlast, method = "jw")]
@@ -78,5 +79,5 @@ out = cnd[r == 1 & r2 == 1 & pred > 0.5, list(couple_id, persid, idx, year, pred
 out[, individual_id := stringi::stri_replace_last_regex(couple_id, "_mar_\\d", "")]
 out[, nth_marriage := stringi::stri_extract_last_regex(couple_id, "\\d$")]
 
-fwrite(out, "saf2opg_1750_1820_2022feb18.csv")
+fwrite(out, "saf2opg_1700_1824_2022mar7.csv")
 # fwrite(out, "saf2opg_1750_1820_2022jan27.csv")
