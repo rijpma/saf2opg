@@ -33,7 +33,7 @@ consan = rbindlist(
 
 opg = fread("~/data/cape/opg/opgaafrol_all_linked_20220220.csv.gz")
 
-saf2opg = fread("~/data/cape/saf2opg_1750_1820_2022feb18.csv")
+saf2opg = fread("~/data/cape/saf2opg_1700_1824_2022mar7.csv")
 
 opg[, persid := paste0(rol, "_", persid)]
 
@@ -108,10 +108,14 @@ tomerge = merge(tomerge, firstrol, by = "couple_id", all = TRUE)
 
 tomerge[!is.na(pca), pcaq := cut(pca, quantile(pca, 0:4/4), include.lowest = TRUE, dig.lab = 2)]
 tomerge[, pcaqn := as.numeric(pcaq)]
+tomerge[!is.na(pca), pcaq_top := cut(pca, quantile(pca, c(0, 0.25, 0.5, 0.75, 0.8, 0.9, 0.99)), include.lowest = TRUE, dig.lab = 2)]
+tomerge[, pcaq_top_n := as.numeric(pcaq_top)]
 
 dim(saf_long)
 saf_long = merge(saf_long, tomerge, by = "couple_id", all.x = TRUE, all.y = FALSE)
 dim(saf_long)
+# consider a all = TRUE link so you can get all the relevant info in one dataset
+# but what do you do with the 
 
 # check a few links
 set.seed(8912)
@@ -120,12 +124,12 @@ saf_long[match(linktests$couple_id, couple_id), .SD, .SDcols = patterns("(firstn
 opg[match(linktests$persid, persid), .SD, .SDcols = patterns("(last|first)$")]
 
 # linkage percentages
-saf_long[between(sy, 1750, 1820), mean(!is.na(firstrol))]
+saf_long[between(sy, 1700, 1824), mean(!is.na(firstrol))]
 opg[, mean(!is.na(couple_id))]
 
 pdf("~/repos/saf2opg/out/saf2opgrates.pdf", height = 4, width = 8)
 mypar(mfrow = c(1, 2))
-toplot = saf_long[between(sy, 1750, 1820), mean(!is.na(firstrol)), by = sy][order(sy)]
+toplot = saf_long[between(sy, 1700, 1824), mean(!is.na(firstrol)), by = sy][order(sy)]
 plot(toplot, pch = 19, type = 'b', col = 2,
     xlab = "birth year", ylab = "share linked to opg",
     main = "OPG found in SAF")
@@ -142,11 +146,13 @@ out = saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & betwe
     .SDcols = c("con", "fbd", "fsd", "mbd", "msd")]
 knitr::kable(transpose(out, keep.names = "type"), digits = 1)
 
-toplot = saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & between(sy, 1750, 1820),
-    mean(con),
-    by = list(decade = round(floor(sy / 10) * 10))]
-
 saf_long[, decade := round(floor(sy / 10) * 10)]
+saf_long[, linked := !is.na(firstrol)]
+toplot = cube(
+    saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & between(sy, 1750, 1819)],
+    j = list(share_con = mean(con)),
+    by = c("linked", "decade"))
+
 m = lm(con ~ as.factor(decade) - 1, data = saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & between(sy, 1750, 1820)])
 matplot(confint(m), type = 'l')
 saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & between(sy, 1750, 1820),
@@ -154,9 +160,18 @@ saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & between(sy,
 
 pdf("~/repos/saf2opg/out/consan_overtime.pdf", height = 6)
 mypar() 
-plot(toplot[order(decade)], 
+plot(share_con ~ decade,
+    data = toplot[linked == TRUE][order(decade)], 
     type = 'b', pch = 19, col = 2,
-    ylab = "share cons.", xlab = "birth decade")
+    ylab = "share cons.", xlab = "birth decade",
+    ylim = c(0, 0.13))
+lines(share_con ~ decade,
+    data = toplot[is.na(linked)][order(decade)],
+    type = 'b', pch = 19, col = "gray")
+lines(share_con ~ decade,
+    data = toplot[linked == FALSE][order(decade)],
+    type = 'b', pch = 19, col = 1)
+legend("bottomright", fill = c(1, "gray", 2), legend = c("linked", "all", "unlinked"))
 dev.off()
 
 # by first observed opgaafrol location
@@ -172,6 +187,26 @@ out = cube(saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & !is.na(freq
     by = "freqrol",
     .SDcols = c("con", "fbd", "fsd", "mbd", "msd"))
 knitr::kable(out[order(con)], digits = 1)
+
+# also with time
+saf_long[!is.na(firstrol), quantile(sy)]
+cuts = c(1750, 1775, 1800, 1820)
+saf_long[, period := cut(sy, cuts, labels = cuts[-length(cuts)])]
+saf_long[, period := as.numeric(as.character(period))]
+# first con with without firstrol missing
+
+out = cube(saf_long[!is.na(firstrol) & !is.na(individual_id_wife) & !is.na(couple_id) & !is.na(firstrol) & gen >= 3 & between(sy, 1750, 1820)],
+    j = list(share_con = mean(con), se = sd(con) / sqrt(.N), N = .N),
+    by = c("period", "firstrol"))
+out[, hi := share_con + se]
+out[, lo := share_con - se]
+out[is.na(firstrol), firstrol := "all"]
+
+outplot = ggplot(out[!is.na(period) & N > 42], aes(period, share_con, col = firstrol)) + 
+    geom_point() + geom_line() + theme_classic()
+pdf("~/repos/saf2opg/out/region_overtime.pdf", height = 6)
+print(outplot)
+dev.off()
 
 # by family line
 saf_long[, lineage := stri_replace_all_regex(individual_id, "a\\d.*", "")]
@@ -239,6 +274,35 @@ axis(1, at = 1:4, labels = toplot_parent[!is.na(pcaq), unique(pcaq)])
 axis(2)
 dev.off()
 
+toplot_parent = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820), list(mean(parent_of_con, na.rm = TRUE), .N), by = list(pcaq_top, pcaq_top_n)][order(pcaq_top)]
+toplot_couple = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820), list(mean(con, na.rm = TRUE), .N), by = list(pcaq_top, pcaq_top_n)][order(pcaq_top)]
+toplot_childr = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820), list(mean(child_of_con, na.rm = TRUE), .N), by = list(pcaq_top, pcaq_top_n)][order(pcaq_top)]
+
+pdf("~/repos/saf2opg/out/consan_parents_opg_top.pdf", height = 6)
+mypar()
+plot(V1 ~ pcaq_top_n, data = toplot_parent, 
+    main = "Parents", xlab = "asset PCA quantile", ylab = "share cons.",
+    col = 2, type = "b", pch = 19, ylim = c(0, 0.23), axes = FALSE)
+axis(1, at = 1:6, labels = toplot_parent[!is.na(pcaq_top), unique(pcaq_top)])
+axis(2)
+dev.off()
+pdf("~/repos/saf2opg/out/consan_couples_opg_top.pdf", height = 6)
+mypar()
+plot(V1 ~ pcaq_top_n, data = toplot_couple, 
+    main = "Couple", xlab = "asset PCA quantile", ylab = "share cons.",
+    col = 2, type = "b", pch = 19, ylim = c(0, 0.23), axes = FALSE)
+axis(1, at = 1:6, labels = toplot_parent[!is.na(pcaq_top), unique(pcaq_top)])
+axis(2)
+dev.off()
+pdf("~/repos/saf2opg/out/consan_children_opg_top.pdf", height = 6)
+mypar()
+plot(V1 ~ pcaq_top_n, data = toplot_childr, 
+    main = "Offspring", xlab = "asset PCA quantile", ylab = "share cons.",
+    col = 2, type = "b", pch = 19, ylim = c(0, 0.23), axes = FALSE)
+axis(1, at = 1:6, labels = toplot_parent[!is.na(pcaq_top), unique(pcaq_top)])
+axis(2)
+dev.off()
+
 # intergeneration picture
 
 # merge child id into consan marriages
@@ -288,15 +352,19 @@ toplot = merge(
     parentchild,
     tomerge[, list(individual_id, parent_pca = pca + 1)],
     by.x = "parent",
-    by.y = "individual_id")
+    by.y = "individual_id",
+    all = TRUE)
 toplot = merge(
     toplot,
     tomerge[, list(individual_id, child_pca = pca + 1)],
     by.x = "child",
-    by.y = "individual_id")
+    by.y = "individual_id",
+    all = TRUE)
 toplot[!is.na(parent_pca)]
-toplot[!is.na(child_pca)]
-toplot[!is.na(child_pca) & !is.na(parent_pca)]
+toplot[!is.na(pca)]
+toplot[!is.na(pca_child)]
+toplot[!is.na(pca) & !is.na(pca_child)]
+toplot[!is.na(pca) & !is.na(pca_grandparent)]
 # so you have 2000, of which 10% is cm, so expect 200, so 160 is not a crazy number here
 
 yl = range(toplot$parent_pca, na.rm = TRUE)
