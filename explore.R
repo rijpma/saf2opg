@@ -61,6 +61,14 @@ saf_long = merge(saf_long,
     by = "couple_id",
     all.x = TRUE)
 
+saf_long[occupation != "", farmer := grepl("farm", occupation)]
+
+saf_long[!is.na(firstrol), quantile(sy)]
+cuts = c(1750, 1775, 1800, 1820)
+saf_long[, period := cut(sy, cuts, labels = cuts[-length(cuts)])]
+saf_long[, period := as.numeric(as.character(period))]
+
+
 # quick check brother-sister marriages -- rare
 saf_long[stringi::stri_sub(individual_id,0, -3) == stringi::stri_sub(individual_id_wife, 0, -3)]
 
@@ -108,8 +116,9 @@ tomerge = merge(tomerge, firstrol, by = "couple_id", all = TRUE)
 
 tomerge[!is.na(pca), pcaq := cut(pca, quantile(pca, 0:4/4), include.lowest = TRUE, dig.lab = 2)]
 tomerge[, pcaqn := as.numeric(pcaq)]
-tomerge[!is.na(pca), pcaq_top := cut(pca, quantile(pca, c(0, 0.25, 0.5, 0.75, 0.8, 0.9, 0.99)), include.lowest = TRUE, dig.lab = 2)]
-tomerge[, pcaq_top_n := as.numeric(pcaq_top)]
+quantile_top = c(0, 0.25, 0.5, 0.75, 0.8, 0.9, 0.99, 1)
+tomerge[!is.na(pca), pcaq_top := cut(pca, quantile(pca, quantile_top), include.lowest = TRUE, dig.lab = 2)]
+tomerge[, pcaq_top_n := ..quantile_top[as.numeric(pcaq_top) + 1]]
 
 dim(saf_long)
 saf_long = merge(saf_long, tomerge, by = "couple_id", all.x = TRUE, all.y = FALSE)
@@ -174,6 +183,20 @@ lines(share_con ~ decade,
 legend("bottomright", fill = c(1, "gray", 2), legend = c("linked", "all", "unlinked"))
 dev.off()
 
+# by occupation
+toplot = saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & between(sy, 1750, 1819),
+    j = list(share_con = mean(con), .N, sd = sd(con)),
+    by = c("farmer", "decade")]
+pdf("~/repos/saf2opg/out/consan_overtime_farmer.pdf", height = 6)
+mypar()
+plot(share_con ~ decade, data = toplot[farmer == TRUE][order(decade)], 
+    type = 'b', pch = 19, col = 1,
+    ylim = c(0, 0.12))
+lines(share_con ~ decade, data = toplot[farmer == FALSE][order(decade)], 
+    type = 'b', pch = 19, col = 2)
+legend("bottomright", fill = c(1, 2), legend = c("farmer", "other"))
+dev.off()
+
 # by first observed opgaafrol location
 out = cube(saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & !is.na(firstrol) & gen >= 3 & between(sy, 1750, 1820)],
     j = lapply(.SD * 100, mean),
@@ -189,10 +212,6 @@ out = cube(saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & !is.na(freq
 knitr::kable(out[order(con)], digits = 1)
 
 # also with time
-saf_long[!is.na(firstrol), quantile(sy)]
-cuts = c(1750, 1775, 1800, 1820)
-saf_long[, period := cut(sy, cuts, labels = cuts[-length(cuts)])]
-saf_long[, period := as.numeric(as.character(period))]
 # first con with without firstrol missing
 
 out = cube(saf_long[!is.na(firstrol) & !is.na(individual_id_wife) & !is.na(couple_id) & !is.na(firstrol) & gen >= 3 & between(sy, 1750, 1820)],
@@ -282,24 +301,24 @@ pdf("~/repos/saf2opg/out/consan_parents_opg_top.pdf", height = 6)
 mypar()
 plot(V1 ~ pcaq_top_n, data = toplot_parent, 
     main = "Parents", xlab = "asset PCA quantile", ylab = "share cons.",
-    col = 2, type = "b", pch = 19, ylim = c(0, 0.23), axes = FALSE)
-axis(1, at = 1:6, labels = toplot_parent[!is.na(pcaq_top), unique(pcaq_top)])
+    col = 2, type = "b", pch = 19, ylim = c(0, 0.25), axes = FALSE)
+axis(1, at = toplot_parent$pcaq_top_n, labels = toplot_parent$pcaq_top)
 axis(2)
 dev.off()
 pdf("~/repos/saf2opg/out/consan_couples_opg_top.pdf", height = 6)
 mypar()
 plot(V1 ~ pcaq_top_n, data = toplot_couple, 
     main = "Couple", xlab = "asset PCA quantile", ylab = "share cons.",
-    col = 2, type = "b", pch = 19, ylim = c(0, 0.23), axes = FALSE)
-axis(1, at = 1:6, labels = toplot_parent[!is.na(pcaq_top), unique(pcaq_top)])
+    col = 2, type = "b", pch = 19, ylim = c(0, 0.25), axes = FALSE)
+axis(1, at = toplot_couple$pcaq_top_n, labels = toplot_couple$pcaq_top)
 axis(2)
 dev.off()
 pdf("~/repos/saf2opg/out/consan_children_opg_top.pdf", height = 6)
 mypar()
 plot(V1 ~ pcaq_top_n, data = toplot_childr, 
     main = "Offspring", xlab = "asset PCA quantile", ylab = "share cons.",
-    col = 2, type = "b", pch = 19, ylim = c(0, 0.23), axes = FALSE)
-axis(1, at = 1:6, labels = toplot_parent[!is.na(pcaq_top), unique(pcaq_top)])
+    col = 2, type = "b", pch = 19, ylim = c(0, 0.25), axes = FALSE)
+axis(1, at = toplot_childr$pcaq_top_n, labels = toplot_childr$pcaq_top)
 axis(2)
 dev.off()
 
