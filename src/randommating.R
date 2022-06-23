@@ -35,7 +35,23 @@ saf_long = merge(saf_long,
     by = "couple_id",
     all.x = TRUE)
 
-# on basis of average number of cousins
+# firstrol info for wives
+firstrol_wives = merge(links, 
+    firstrol[, list(couple_id, rol_wife = firstrol, districtall_wife = firstdistrictall)],
+    by.x = "couple_id_from", by.y = "couple_id",
+    all.x = TRUE)
+firstrol_wives = firstrol_wives[order(nth_marriage_to), lapply(.SD, first), by = couple_id_to]
+saf_long = merge(
+    saf_long,
+    firstrol_wives[, list(couple_id_to, rol_wife, districtall_wife)],
+    by.x = "couple_id",
+    by.y = "couple_id_to",
+    all.x = TRUE)
+saf_long[is.na(firstrol), firstrol := rol_wife]
+saf_long[is.na(firstdistrictall), firstdistrictall := districtall_wife]
+
+# approach # 1
+# expected on basis of average number of cousins
 cousins[, uniqueN(child.y), by = child.x][, mean(V1)]
 cousins[, .N, by = child.x][, mean(N)]
 # numbers differ because sometimes through multiple grandparents
@@ -46,22 +62,32 @@ saf_long[individual_id %chin% cousins$child.x, .N, by = gender]
 15 / saf_long[!duplicated(individual_id) & gender == 2, .N] * 100
 # 0.01 pct
 
-# marry completely at random
+# approach #2
+# marry two samples completely at random
+N = 1e7
+couples = data.table(
+    saf_long[gender == 1 & !is.na(sy)][sample(1:.N, N, replace = TRUE), list(individual_id_husb = individual_id, sy_husb = sy, rol_husb = firstrol)],
+    saf_long[gender == 2 & !is.na(sy)][sample(1:.N, N, replace = TRUE), list(individual_id_wife = individual_id, sy_wife = sy, rol_wife = firstrol)]
+)
+couples = unique(couples)
 
-N = 100
-x = rep(NA_integer_, N)
-for (i in 1:N){
-    husbands_sample = sample(saf_long[gender == 1, individual_id], 10e3)
-    wives_sample = sample(saf_long[gender == 2, individual_id], 10e3)
-    x[i] = sum(stringi::stri_join(husbands_sample, wives_sample) %chin% cousins$couple)
-    cat(i, "-")
-}
-x = x / 100 # now in percentages (actual!)
-mean(x) # 0.003 pct
-sd(x)
-table(x)
+couples[, cousin := stri_join(individual_id_husb, individual_id_wife) %chin% cousins$couple]
 
-# alternatively, pair a sample with everyone
+# the naive number again
+couples[, sum(cousin)]
+couples[, mean(cousin)] * 100
+
+# with reasonable spousal age gap
+couples[between(sy_wife - sy_husb, -2, 14), sum(cousin)]
+couples[between(sy_wife - sy_husb, -2, 14), mean(cousin)] * 100
+# 0.02%
+
+couples[between(sy_wife - sy_husb, -2, 14) & rol_husb == rol_wife, mean(cousin)] * 100
+# that also looks familiar!!!
+
+
+# approach #3, pair a sample with all possible marriage candidates
+# the naive number again
 husbands_sample = sample(saf_long[gender == 1, individual_id], 100)
 husbands = saf_long[individual_id %in% husbands_sample]
 couples = merge(husbands[, list(individual_id, id = 1)],
@@ -71,10 +97,9 @@ couples = merge(husbands[, list(individual_id, id = 1)],
 couples[, couple := stringi::stri_join(individual_id.x, individual_id.y)]
 couples[, cousin := couple %chin% cousins$couple]
 couples[, mean(cousin), by = individual_id.x][, mean(V1)] * 100
-# 0.002%
 rm("couples")
 
-# block sample by age
+# restrict by age gap
 # first the distribution of spousal age gaps to see the range
 
 links = merge(links,
@@ -88,7 +113,6 @@ links = merge(links,
 
 # rare, but funky gaps exist
 # is there birthyear in the model?
-hist(links[between(sy_wife - sy_husb, -50, 50), sy_wife - sy_husb], breaks = 100)
 quantile(links[between(sy_wife - sy_husb, -50, 50), sy_wife - sy_husb], (0:10)/10)
 # so -2 to +14 covers pretty 80%
 
@@ -115,7 +139,6 @@ spouses = candidates[husbands, on = list(wife_upper <= sy_husb, wife_lower >= sy
 
 spouses[, cousin := stringi::stri_join(individual_id_husb, individual_id_wife) %chin% cousins$couple]
 spouses[, mean(cousin), by = individual_id_husb][, mean(V1)] * 100
-# 0.02%
 # or should it be?
 spouses[, mean(cousin)] * 100
 
@@ -144,7 +167,7 @@ candidates = merge(saf_long[, -c("firstrol", "firstdistrictall")],
     by.x = "couple_id",
     by.y = "couple_id_to",
     all.x = TRUE,)
-candidates = candidates[
+candidates = saf_long[
     gender == 2 
     & !is.na(sy)
     & !is.na(firstrol),
@@ -162,11 +185,6 @@ spouses = candidates[husbands, on = list(firstrol, wife_upper <= sy_husb, wife_l
 spouses[, cousin := stringi::stri_join(individual_id_husb, individual_id_wife) %chin% cousins$couple]
 spouses[, .N, by = individual_id_husb]
 spouses[, mean(cousin), by = individual_id_husb][, mean(V1)] * 100
-# so, on basis of average N cousins, 0.01%
-# so, on basis of simulation, ignoring age, 0.003%
-# so, on basis of simulation, including age, 0.02%
-# so, on the basis of district and age, 0.3%
-# that's higher, but still low
 
 # and finally, same thing but on veldcornetschap
 # much larger number because vc is missing often
@@ -188,4 +206,3 @@ spouses = candidates[husbands, on = list(firstdistrictall, wife_upper <= sy_husb
 spouses[, cousin := stringi::stri_join(individual_id_husb, individual_id_wife) %chin% cousins$couple]
 spouses[, .N, by = individual_id_husb]
 spouses[, mean(cousin), by = individual_id_husb][, mean(V1)] * 100
-# 0.9% but this strikes me as a noisy number
