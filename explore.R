@@ -1,6 +1,9 @@
 rm(list = ls())
 
 library("data.table")
+library("stringi")
+library("fixest")
+library("ggplot2")
 
 mypar = function(...){
     par(..., 
@@ -18,6 +21,8 @@ spouselinks = fread("~/data/cape/saf/spousallinks_full_2021jan6.csv", na.strings
 
 parentchild = fread("~/data/cape/saf/parentchild.csv", na.strings = "")
 
+siblings = fread("~/data/cape/saf/siblings.csv", na.strings = "")
+
 fabr = fread("~/data/cape/saf/fabr.csv")
 mobr = fread("~/data/cape/saf/mobr.csv")
 fasi = fread("~/data/cape/saf/fasi.csv")
@@ -31,7 +36,7 @@ consan = rbindlist(
     use.names = FALSE, id = "type")
 # some duplicates here due to multiple lines giving consan marriage
 
-opg = fread("~/data/cape/opg/opgaafrol_all_linked_20220220.csv.gz")
+opg = fread(cmd = "gunzip -c ~/data/cape/opg/opgaafrol_all_linked_20220220.csv.gz")
 
 saf2opg = fread("~/data/cape/saf2opg_1700_1824_2022mar7.csv")
 
@@ -54,6 +59,7 @@ opg[!is.na(pca), quantile(pca, 0:4/4)]
 # data merging
 # men as ego only
 saf_long = saf_long[gender == 1]
+
 
 # spouse links
 saf_long = merge(saf_long, 
@@ -104,7 +110,7 @@ opg = merge(
 
 # add opg to saf
 # for which we need to average over couples
-tomerge = opg[!is.na(couple_id), lapply(.SD, mean, na.rm = TRUE), .SDcols = c(vrbs, "pca", "reapwheat", "reapbarley"), by = list(couple_id)]
+tomerge = opg[!is.na(couple_id), lapply(.SD, mean, na.rm = TRUE), .SDcols = c(vrbs, "pca", "reapwheat", "reapbarley", "year"), by = list(couple_id)]
 
 # add opg locations to saf
 freqrol = opg[!is.na(couple_id), .N, by = list(freqrol = rol, couple_id)][order(-N)][!duplicated(couple_id)]
@@ -119,6 +125,26 @@ tomerge[, pcaqn := as.numeric(pcaq)]
 quantile_top = c(0, 0.25, 0.5, 0.75, 0.8, 0.9, 0.99, 1)
 tomerge[!is.na(pca), pcaq_top := cut(pca, quantile(pca, quantile_top), include.lowest = TRUE, dig.lab = 2)]
 tomerge[, pcaq_top_n := ..quantile_top[as.numeric(pcaq_top) + 1]]
+
+tomerge[!is.na(pca), 
+    pcaq_reg := cut(pca, quantile(pca, 0:4/4), include.lowest = TRUE, dig.lab = 2),
+    by = firstrol]
+tomerge[, pcaq_reg_n := as.numeric(pcaq_reg)]
+tomerge[!is.na(pcaq_reg_n), pcaq_reg_n := pcaq_reg_n - min(pcaq_reg_n) + 1, by = firstrol]
+
+tomerge[cattle > 0, 
+    cattleq_reg := cut(cattle, quantile(cattle, 0:4/4), include.lowest = TRUE, dig.lab = 2),
+    by = firstrol]
+tomerge[, cattleq_reg_n := as.numeric(cattleq_reg)]
+tomerge[!is.na(cattleq_reg_n), cattleq_reg_n := cattleq_reg_n - min(cattleq_reg_n) + 1, by = firstrol]
+tomerge[cattle == 0, cattleq_reg_n := 0]
+
+tomerge[slaves > 0, 
+    slavesq_reg := cut(slaves, quantile(slaves, 0:4/4), include.lowest = TRUE, dig.lab = 2),
+    by = firstrol]
+tomerge[, slavesq_reg_n := as.numeric(slavesq_reg)]
+tomerge[!is.na(slavesq_reg_n), slavesq_reg_n := slavesq_reg_n - min(slavesq_reg_n) + 1, by = firstrol]
+tomerge[slaves == 0, slavesq_reg_n := 0]
 
 dim(saf_long)
 saf_long = merge(saf_long, tomerge, by = "couple_id", all.x = TRUE, all.y = FALSE)
@@ -157,6 +183,7 @@ knitr::kable(transpose(out, keep.names = "type"), digits = 1)
 
 saf_long[, decade := round(floor(sy / 10) * 10)]
 saf_long[, linked := !is.na(firstrol)]
+
 toplot = cube(
     saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & between(sy, 1750, 1819)],
     j = list(share_con = mean(con)),
@@ -194,7 +221,9 @@ plot(share_con ~ decade, data = toplot[farmer == TRUE][order(decade)],
     ylim = c(0, 0.12))
 lines(share_con ~ decade, data = toplot[farmer == FALSE][order(decade)], 
     type = 'b', pch = 19, col = 2)
-legend("bottomright", fill = c(1, 2), legend = c("farmer", "other"))
+lines(share_con ~ decade, data = toplot[is.na(farmer)][order(decade)], 
+    type = 'b', pch = 19, col = "gray")
+legend("bottomright", fill = c(1, "gray", 2), legend = c("farmer", "no occ", "other"))
 dev.off()
 
 # by first observed opgaafrol location
@@ -213,22 +242,21 @@ knitr::kable(out[order(con)], digits = 1)
 
 # also with time
 # first con with without firstrol missing
-
-out = cube(saf_long[!is.na(firstrol) & !is.na(individual_id_wife) & !is.na(couple_id) & !is.na(firstrol) & gen >= 3 & between(sy, 1750, 1820)],
+toplot = cube(saf_long[!is.na(firstrol) & !is.na(individual_id_wife) & !is.na(couple_id) & !is.na(firstrol) & gen >= 3 & between(sy, 1750, 1820)],
     j = list(share_con = mean(con), se = sd(con) / sqrt(.N), N = .N),
     by = c("period", "firstrol"))
-out[, hi := share_con + se]
-out[, lo := share_con - se]
-out[is.na(firstrol), firstrol := "all"]
+toplot[, hi := share_con + se]
+toplot[, lo := share_con - se]
+toplot[is.na(firstrol), firstrol := "all"]
 
-outplot = ggplot(out[!is.na(period) & N > 42], aes(period, share_con, col = firstrol)) + 
+outplot = ggplot(toplot[!is.na(period) & N > 42], aes(period, share_con, col = firstrol)) + 
     geom_point() + geom_line() + theme_classic()
 pdf("~/repos/saf2opg/out/region_overtime.pdf", height = 6)
 print(outplot)
 dev.off()
 
 # by family line
-saf_long[, lineage := stri_replace_all_regex(individual_id, "a\\d.*", "")]
+saf_long[, lineage := stringi::stri_replace_all_regex(individual_id, "a\\d.*", "")]
 
 out = saf_long[!is.na(individual_id_wife) & !is.na(couple_id) & gen >= 3 & between(sy, 1750, 1820),
     list(.N, pctcon = mean(con * 100), pca = mean(pca, na.rm = TRUE)), 
@@ -262,6 +290,23 @@ dev.off()
 
 texreg::screenreg(list(m100, m50, m10))
 
+pdf("~/repos/saf2opg/out/distributions.pdf", width = 9)
+par(mfrow = c(2, 3))
+plot(density(saf_long[parent_of_con == FALSE & !is.na(pca), pca]), main = "parents of CM")
+lines(density(saf_long[parent_of_con == TRUE & !is.na(pca), pca]), col = 2)
+plot(density(saf_long[con == FALSE & !is.na(pca), pca]), main = "CM")
+lines(density(saf_long[con == TRUE & !is.na(pca), pca]), col = 2)
+plot(density(saf_long[child_of_con == FALSE & !is.na(pca), pca]), main = "Children of CM")
+lines(density(saf_long[child_of_con == TRUE & !is.na(pca), pca]), col = 2)
+
+plot(density(saf_long[parent_of_con == TRUE & !is.na(pca), log(pca + 1)]), col = 2, main = "parents of CM (log scale)")
+lines(density(saf_long[parent_of_con == FALSE & !is.na(pca), log(pca + 1)]))
+plot(density(saf_long[con == FALSE & !is.na(pca), log(pca + 1)]), main = "CM (log scale)")
+lines(density(saf_long[con == TRUE & !is.na(pca), log(pca + 1)]), col = 2)
+plot(density(saf_long[child_of_con == FALSE & !is.na(pca), log(pca + 1)]), main = "Children of CM (log scale)")
+lines(density(saf_long[child_of_con == TRUE & !is.na(pca), log(pca + 1)]), col = 2)
+dev.off()
+
 # gradients
 
 toplot_parent = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820), list(mean(parent_of_con, na.rm = TRUE), .N), by = list(pcaq, pcaqn)][order(pcaq)]
@@ -293,34 +338,245 @@ axis(1, at = 1:4, labels = toplot_parent[!is.na(pcaq), unique(pcaq)])
 axis(2)
 dev.off()
 
+# split these by district (stel rein first) and slave/livestock
+pdf("~/repos/saf2opg/out/gradient_byregion.pdf", width = 9, height = 4)
+mypar(mfrow = c(1, 3))
+toplot_parent = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820) & firstrol %in% c("rein", "stel"), list(mean(parent_of_con, na.rm = TRUE), .N), by = list(firstrol, pcaq_reg, pcaq_reg_n)][order(pcaq_reg)]
+toplot_parent = dcast(toplot_parent[!is.na(firstrol) & !is.na(pcaq_reg_n)], pcaq_reg_n ~ firstrol, value.var = "V1")
+matplot(toplot_parent[, 1], toplot_parent[, 2:3],
+    xlab = "asset PCA quantile", ylab = "share cons.", main = "Parents",
+    type = "b", pch = 19, lty = 1,
+    ylim = c(0, 0.28))
+legend("topleft", fill = 1:2, legend = colnames(toplot_parent)[2:3])
+
+toplot_couple = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820) & firstrol %in% c("rein", "stel"), list(mean(con, na.rm = TRUE), .N), by = list(firstrol, pcaq_reg, pcaq_reg_n)][order(pcaq_reg)]
+toplot_couple = dcast(toplot_couple[!is.na(firstrol) & !is.na(pcaq_reg_n)], pcaq_reg_n ~ firstrol, value.var = "V1")
+matplot(toplot_couple[, 1], toplot_couple[, 2:3],
+    xlab = "asset PCA quantile", ylab = "share cons.", main = "Couple",
+    type = "b", pch = 19, lty = 1,
+    ylim = c(0, 0.28))
+legend("topleft", fill = 1:2, legend = colnames(toplot_couple)[2:3])
+
+toplot_childr = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820) & firstrol %in% c("rein", "stel"), list(mean(child_of_con, na.rm = TRUE), .N), by = list(firstrol, pcaq_reg, pcaq_reg_n)][order(pcaq_reg)]
+toplot_childr = dcast(toplot_childr[!is.na(firstrol) & !is.na(pcaq_reg_n)], pcaq_reg_n ~ firstrol, value.var = "V1")
+matplot(toplot_childr[, 1], toplot_childr[, 2:3],
+    xlab = "asset PCA quantile", ylab = "share cons.", main = "Offspring",
+    type = "b", pch = 19, lty = 1,
+    ylim = c(0, 0.28))
+legend("topleft", fill = 1:2, legend = colnames(toplot_childr)[2:3])
+dev.off()
+
+
+# by specific assets
+pdf("~/repos/saf2opg/out/assets_by_region.pdf", width = 9)
+mypar(mfrow = c(2, 2))
+toplot_parent = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820) & firstrol %in% c("rein", "stel"), 
+    list(mean(parent_of_con), .N), by = list(slavesq_reg_n, firstrol)]
+toplot_parent = dcast(toplot_parent[!is.na(firstrol) & !is.na(slavesq_reg_n)], slavesq_reg_n ~ firstrol, value.var = "V1")
+matplot(toplot_parent[, 1], toplot_parent[, 2:3],
+    xlab = "slaves q", ylab = "share cons.", main = "Parents, slaveholding",
+    type = "b", pch = 19, lty = 1, axes = TRUE,
+    ylim = c(0, 0.27))
+legend("topleft", fill = 1:2, legend = colnames(toplot_parent)[2:3])
+
+toplot_parent = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820) & firstrol %in% c("rein", "stel"), 
+    list(mean(parent_of_con), .N), by = list(cattleq_reg_n, firstrol)]
+toplot_parent = dcast(toplot_parent[!is.na(firstrol) & !is.na(cattleq_reg_n)], cattleq_reg_n ~ firstrol, value.var = "V1")
+matplot(toplot_parent[, 1], toplot_parent[, 2:3],
+    xlab = "cattle q.", ylab = "share cons.", main = "Parents, cattle",
+    type = "b", pch = 19, lty = 1, axes = TRUE,
+    ylim = c(0, 0.27))
+legend("topleft", fill = 1:2, legend = colnames(toplot_parent)[2:3])
+
+toplot_couple = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820) & firstrol %in% c("rein", "stel"), 
+    list(mean(con), .N), by = list(slavesq_reg_n, firstrol)]
+toplot_couple = dcast(toplot_couple[!is.na(firstrol) & !is.na(slavesq_reg_n)], slavesq_reg_n ~ firstrol, value.var = "V1")
+matplot(toplot_couple[, 1], toplot_couple[, 2:3],
+    xlab = "slaves q", ylab = "share cons.", main = "Couple, slaveholding",
+    type = "b", pch = 19, lty = 1, axes = TRUE,
+    ylim = c(0, 0.27))
+legend("topleft", fill = 1:2, legend = colnames(toplot_couple)[2:3])
+
+toplot_couple = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820) & firstrol %in% c("rein", "stel"), 
+    list(mean(con), .N), by = list(cattleq_reg_n, firstrol)]
+toplot_couple = dcast(toplot_couple[!is.na(firstrol) & !is.na(cattleq_reg_n)], cattleq_reg_n ~ firstrol, value.var = "V1")
+matplot(toplot_couple[, 1], toplot_couple[, 2:3],
+    xlab = "cattle q.", ylab = "share cons.", main = "Couple, cattle",
+    type = "b", pch = 19, lty = 1, axes = TRUE,
+    ylim = c(0, 0.27))
+legend("topleft", fill = 1:2, legend = colnames(toplot_parent)[2:3])
+dev.off()
+
 toplot_parent = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820), list(mean(parent_of_con, na.rm = TRUE), .N), by = list(pcaq_top, pcaq_top_n)][order(pcaq_top)]
 toplot_couple = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820), list(mean(con, na.rm = TRUE), .N), by = list(pcaq_top, pcaq_top_n)][order(pcaq_top)]
 toplot_childr = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820), list(mean(child_of_con, na.rm = TRUE), .N), by = list(pcaq_top, pcaq_top_n)][order(pcaq_top)]
 
-pdf("~/repos/saf2opg/out/consan_parents_opg_top.pdf", height = 6)
-mypar()
+pdf("~/repos/saf2opg/out/gradient_top.pdf", height = 4, width = 9)
+mypar(mfrow = c(1, 3))
 plot(V1 ~ pcaq_top_n, data = toplot_parent, 
     main = "Parents", xlab = "asset PCA quantile", ylab = "share cons.",
     col = 2, type = "b", pch = 19, ylim = c(0, 0.25), axes = FALSE)
 axis(1, at = toplot_parent$pcaq_top_n, labels = toplot_parent$pcaq_top)
 axis(2)
-dev.off()
-pdf("~/repos/saf2opg/out/consan_couples_opg_top.pdf", height = 6)
-mypar()
 plot(V1 ~ pcaq_top_n, data = toplot_couple, 
     main = "Couple", xlab = "asset PCA quantile", ylab = "share cons.",
     col = 2, type = "b", pch = 19, ylim = c(0, 0.25), axes = FALSE)
 axis(1, at = toplot_couple$pcaq_top_n, labels = toplot_couple$pcaq_top)
 axis(2)
-dev.off()
-pdf("~/repos/saf2opg/out/consan_children_opg_top.pdf", height = 6)
-mypar()
 plot(V1 ~ pcaq_top_n, data = toplot_childr, 
     main = "Offspring", xlab = "asset PCA quantile", ylab = "share cons.",
     col = 2, type = "b", pch = 19, ylim = c(0, 0.25), axes = FALSE)
 axis(1, at = toplot_childr$pcaq_top_n, labels = toplot_childr$pcaq_top)
 axis(2)
 dev.off()
+
+# regression dataset
+# take saf_long
+# add nsibling
+# add mean age of observation
+# merge paternal pca
+# merge children's pca? or should that be grandpaternal pca?
+
+dim(saf_long)
+saf_long = merge(
+    saf_long, 
+    siblings[, list(nsib = .N), by = list(individual_id = individual_id.x)], 
+    by = "individual_id", 
+    all.x = TRUE)
+dim(saf_long)
+# add nchild
+saf_long = merge(
+    saf_long,
+    parentchild[, list(nchild = .N), by = parent],
+    by.x = "individual_id",
+    by.y = "parent",
+    all.x = TRUE)
+# add parent_id
+saf_long = merge(
+    saf_long, 
+    parentchild, 
+    by.x = "individual_id", 
+    by.y = "child", 
+    all.x = TRUE)
+dim(saf_long)
+# add uncles
+saf_long = merge(
+    saf_long, 
+    siblings[, list(nuncles = .N), by = list(individual_id = individual_id.x)], , 
+    by.x = "parent", 
+    by.y = "individual_id", 
+    all.x = TRUE)
+dim(saf_long)
+# add grandparentid
+saf_long = merge(
+    saf_long, 
+    parentchild, 
+    by.x = "parent", 
+    by.y = "child", 
+    all.x = TRUE,
+    suffixes = c("", "_parent"))
+dim(saf_long)
+# add "children is "
+
+# and now those awful self-merges... note the averaging over individuals, you
+# should actually do the merges on the couple id, which requires getting the
+# parent child relations on the couple id in the first place which could be tricky
+saf_long = merge(
+    saf_long,
+    unique(saf_long[, list(pca_parent = mean(pca, na.rm = TRUE)), by = list(individual_id)]),
+    by.x = "parent",
+    by.y = "individual_id",
+    all.x = TRUE, all.y = FALSE)
+saf_long = merge(
+    saf_long,
+    unique(saf_long[, list(pca_grandparent = mean(pca, na.rm = TRUE)), by = list(individual_id)]),
+    by.x = "parent_parent",
+    by.y = "individual_id",
+    all.x = TRUE, all.y = FALSE)
+# add child is consanguineous
+saf_long = merge(saf_long,
+    unique(consan[, list(grandparent_id, child_consan = TRUE)]),
+    by.x = "individual_id",
+    by.y = "grandparent_id",
+    all.x = TRUE)
+saf_long[]
+
+saf_long[, decaded := floor(year / 10) * 10]
+saf_long[, mean_age := year - sy]
+dict = c(
+    conTRUE = "cons. marriage",
+    parent_of_conTRUE = "parent cons. marriage",
+    child_of_conTRUE = "child cons. marriage",
+    nsib = "n. siblings",
+    nuncles = "n. uncle/aunts",
+    mean_age = "mean age",
+    pca = "asset index",
+    decaded = "decade",
+    firstrol = "district")
+
+toreg = saf_long[!is.na(individual_id_wife) & gen >= 3 & between(sy, 1750, 1820)]
+toreg = saf_long[!is.na(individual_id_wife) & gen >= 3]
+toreg = saf_long[!is.na(individual_id_wife)]
+toreg = saf_long
+toreg = saf_long[gen >= 3]
+toreg = saf_long[!is.na(individual_id_wife) & gen >= 3]
+hist(toreg$sy)
+
+# crucial here is that we include marriages where gen is 1 or 2, which means that we only know their pedigree 1-2 generations deep. Issue is of course that we can then never know whether they were con, so there the con=FALSE must include some con = TRUE. If con > notcon, then this lowers the gap; if con = notcon it doesn't matter?; if con < notcon, then it blows up the gap but we'd expect it to be negative which it isn't
+mlist = list(
+    fixest::feols(log(pca + 1) ~ con, data = toreg),
+    fixest::feols(log(pca + 1) ~ con + nsib, data = toreg),
+    fixest::feols(log(pca + 1) ~ con + nsib + nuncles, data = toreg),
+    fixest::feols(log(pca + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2), data = toreg),
+    fixest::feols(log(pca + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2) | decaded, data = toreg),
+    fixest::feols(log(pca + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2) | decaded + firstrol, data = toreg, vcov = "twoway"),
+    fixest::feols(log(pca + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2) + log(pca_parent + 1) | decaded + firstrol, data = toreg, vcov = "twoway")
+)
+ests = etable(mlist, dict = dict, digits = 3)
+write.csv(ests, "~/repos/saf2opg/out/reg_couple.csv")
+
+etable(mlist, 
+
+# look siblings, these are siblings of parents, (in addition )we want their nubmer of children 
+# do this everywhere
+mlist = list(
+    fixest::feols(log(pca + 1) ~ parent_of_con, data = toreg),
+    fixest::feols(log(pca + 1) ~ parent_of_con + nsib, data = toreg),
+    fixest::feols(log(pca + 1) ~ parent_of_con + nchild + nsib, data = toreg),
+    fixest::feols(log(pca + 1) ~ parent_of_con + nchild + nsib + mean_age + I(mean_age^2), data = toreg),
+    fixest::feols(log(pca + 1) ~ parent_of_con + nchild + nsib + mean_age + I(mean_age^2) | decaded, data = toreg),
+    fixest::feols(log(pca + 1) ~ parent_of_con + nchild + nsib + mean_age + I(mean_age^2) | decaded + firstrol, data = toreg, vcov = "twoway")
+)
+ests = etable(mlist, dict = dict, digits = 3)
+write.csv(ests, "~/repos/saf2opg/out/reg_parents.csv")
+# out = knitr::kable(ests, format = "html")
+# writeLines(out, "~/repos/saf2opg/out/reg_parents.html")
+
+mlist = list(
+    fixest::feols(log(pca + 1) ~ child_of_con, data = toreg),
+    fixest::feols(log(pca + 1) ~ child_of_con + nsib, data = toreg),
+    fixest::feols(log(pca + 1) ~ child_of_con + nsib + nuncles, data = toreg),
+    fixest::feols(log(pca + 1) ~ child_of_con + nsib + nuncles + mean_age + I(mean_age^2), data = toreg),
+    fixest::feols(log(pca + 1) ~ child_of_con + nsib + nuncles + mean_age + I(mean_age^2) | decaded, data = toreg),
+    fixest::feols(log(pca + 1) ~ child_of_con + nsib + nuncles + mean_age + I(mean_age^2) | decaded + firstrol, data = toreg, vcov = "twoway"),
+    fixest::feols(log(pca + 1) ~ child_of_con + nsib + nuncles + mean_age + I(mean_age^2) + log(pca_parent + 1) | decaded + firstrol, data = toreg, vcov = "twoway")
+)
+ests = etable(mlist, dict = dict, digits = 3)
+write.csv(ests, "~/repos/saf2opg/out/reg_offspring.csv")
+
+mlist = list(
+    all = fixest::feols(log(pca + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2) + log(pca_parent + 1) | decaded + firstrol, data = toreg, vcov = "twoway"),
+    rein = fixest::feols(log(pca + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2) + log(pca_parent + 1) | decaded, data = toreg[firstrol == "rein"], vcov = "twoway"),
+    stel = fixest::feols(log(pca + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2) + log(pca_parent + 1) | decaded, data = toreg[firstrol == "stel"], vcov = "twoway"),
+    rein = fixest::feols(log(cattle + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2) + log(pca_parent + 1) | decaded, data = toreg[firstrol == "rein"], vcov = "twoway"),
+    stel = fixest::feols(log(slaves + 1) ~ con + nsib + nuncles + mean_age + I(mean_age^2) + log(pca_parent + 1) | decaded, data = toreg[firstrol == "stel"], vcov = "twoway")
+)
+ests = etable(mlist, dict = dict, digits = 3)
+write.csv(ests, "~/repos/saf2opg/out/reg_couples_split.csv")
+
+# clean up by focusing on two regions
+# gradients by region-specific quartiles
+
 
 # intergeneration picture
 
