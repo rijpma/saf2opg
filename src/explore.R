@@ -167,11 +167,11 @@ mypar(mfrow = c(1, 2))
 toplot = saf_long[between(sy, 1700, 1824), mean(!is.na(firstrol)), by = sy][order(sy)]
 plot(toplot, pch = 19, type = 'b', col = 2,
     xlab = "birth year", ylab = "share linked to opg",
-    main = "OPG found in SAF")
+    main = "SAF couples found in OPG")
 toplot = opg[, mean(!is.na(couple_id)), by = year]
 plot(toplot[order(year)], pch = 19, type = 'b', col = 2,
     xlab = "census year", ylab = "share linked to saf",
-    main = "SAF found in OPG")
+    main = "OPG couples found in SAF")
 dev.off()
 
 # prevalence
@@ -255,6 +255,12 @@ pdf("~/repos/saf2opg/out/region_overtime.pdf", height = 6)
 print(outplot)
 dev.off()
 
+outplot = ggplot(toplot[!is.na(period) & N > 42 & firstrol %in% c("stel", "rein")], aes(period, share_con, col = firstrol)) + 
+    geom_point() + geom_line() + theme_classic()
+pdf("~/repos/saf2opg/out/rein_stel_overtime.pdf", height = 6)
+print(outplot)
+dev.off()
+
 # by family line
 saf_long[, lineage := stringi::stri_replace_all_regex(individual_id, "a\\d.*", "")]
 
@@ -290,14 +296,8 @@ dev.off()
 
 texreg::screenreg(list(m100, m50, m10))
 
-pdf("~/repos/saf2opg/out/distributions.pdf", width = 9)
-par(mfrow = c(2, 3))
-plot(density(saf_long[parent_of_con == FALSE & !is.na(pca), pca]), main = "parents of CM")
-lines(density(saf_long[parent_of_con == TRUE & !is.na(pca), pca]), col = 2)
-plot(density(saf_long[con == FALSE & !is.na(pca), pca]), main = "CM")
-lines(density(saf_long[con == TRUE & !is.na(pca), pca]), col = 2)
-plot(density(saf_long[child_of_con == FALSE & !is.na(pca), pca]), main = "Children of CM")
-lines(density(saf_long[child_of_con == TRUE & !is.na(pca), pca]), col = 2)
+pdf("~/repos/saf2opg/out/distributions.pdf", width = 9, height = 3)
+par(mfrow = c(1, 3))
 
 plot(density(saf_long[parent_of_con == TRUE & !is.na(pca), log(pca + 1)]), col = 2, main = "parents of CM (log scale)")
 lines(density(saf_long[parent_of_con == FALSE & !is.na(pca), log(pca + 1)]))
@@ -305,7 +305,61 @@ plot(density(saf_long[con == FALSE & !is.na(pca), log(pca + 1)]), main = "CM (lo
 lines(density(saf_long[con == TRUE & !is.na(pca), log(pca + 1)]), col = 2)
 plot(density(saf_long[child_of_con == FALSE & !is.na(pca), log(pca + 1)]), main = "Children of CM (log scale)")
 lines(density(saf_long[child_of_con == TRUE & !is.na(pca), log(pca + 1)]), col = 2)
+legend("topleft", fill = c(1,2), legend = c("no CM", "CM"))
 dev.off()
+
+saf_long[, mean(pca, na.rm = TRUE), by = parent_of_con]
+saf_long[, mean(pca, na.rm = TRUE), by = con]
+saf_long[, mean(pca, na.rm = TRUE), by = child_of_con]
+saf_long[, mean(log(pca + 1), na.rm = TRUE), by = parent_of_con]
+saf_long[, mean(log(pca + 1), na.rm = TRUE), by = con]
+saf_long[, mean(log(pca + 1), na.rm = TRUE), by = child_of_con]
+
+par(mfcol = c(3, 3))
+for(prd in sort(unique(na.omit(saf_long$period)))){
+    toplot = saf_long[period == prd & !is.na(pca)]
+    plot(density(toplot[parent_of_con == TRUE , log(pca + 1)]), col = 2, main = paste(prd, "parents of CM (log scale)"))
+    lines(density(toplot[parent_of_con == FALSE , log(pca + 1)]))
+    plot(density(toplot[con == FALSE , log(pca + 1)]), main = paste(prd, "CM (log scale)"))
+    lines(density(toplot[con == TRUE , log(pca + 1)]), col = 2)
+    plot(density(toplot[child_of_con == FALSE , log(pca + 1)]), main = paste(prd, "Children of CM (log scale)"))
+    lines(density(toplot[child_of_con == TRUE , log(pca + 1)]), col = 2)
+}
+library("fixest")
+m_parent = feols(log(pca + 1) ~ parent_of_con:i(decade), data = saf_long[between(decade, 1700, 1820)])
+m_couple = feols(log(pca + 1) ~ con:i(decade), data = saf_long[between(decade, 1700, 1820)])
+m_offspr = feols(log(pca + 1) ~ child_of_con:i(decade), data = saf_long[between(decade, 1700, 1820)])
+pdf("~/repos/saf2opg/out/average_wealth_overtime.pdf", height = 4, width = 9)
+par(mfrow = c(1, 3))
+iplot(m_parent, ylim = c(-2, 4), type = "b", col = 2, main = "parent of CM couple")
+iplot(m_couple, ylim = c(-2, 4), type = "b", col = 2, main = "CM couple")
+iplot(m_offspr, ylim = c(-2, 4), type = "b", col = 2, main = "Offspring of CM")
+dev.off()
+
+
+m_parent_rein = feols(log(pca + 1) ~ parent_of_con:i(decade), data = saf_long[firstrol == "rein" & between(decade, 1700, 1820)])
+m_couple_rein = feols(log(pca + 1) ~ con:i(decade), data = saf_long[firstrol == "rein" & between(decade, 1700, 1820)])
+m_offspr_rein = feols(log(pca + 1) ~ child_of_con:i(decade), data = saf_long[firstrol == "rein" & between(decade, 1700, 1820)])
+m_parent_stel = feols(log(pca + 1) ~ parent_of_con:i(decade), data = saf_long[firstrol == "stel" & between(decade, 1700, 1820)])
+m_couple_stel = feols(log(pca + 1) ~ con:i(decade), data = saf_long[firstrol == "stel" & between(decade, 1700, 1820)])
+m_offspr_stel = feols(log(pca + 1) ~ child_of_con:i(decade), data = saf_long[firstrol == "stel" & between(decade, 1700, 1820)])
+
+pdf("~/repos/saf2opg/out/average_wealth_overtime_byregion.pdf", height = 6, width = 9)
+par(mfcol = c(2, 3))
+iplot(m_parent_stel, ylim = c(-2, 4), type = "b", col = 2, main = "parent of CM couple, Stel")
+iplot(m_parent_rein, ylim = c(-2, 4), type = "b", col = 2, main = "parent of CM couple, GR")
+iplot(m_couple_stel, ylim = c(-2, 4), type = "b", col = 2, main = "CM couple, Stel")
+iplot(m_couple_rein, ylim = c(-2, 4), type = "b", col = 2, main = "CM couple, GR")
+iplot(m_offspr_stel, ylim = c(-2, 4), type = "b", col = 2, main = "Offspring of CM, Stel")
+iplot(m_offspr_rein, ylim = c(-2, 4), type = "b", col = 2, main = "Offspring of CM, GR")
+dev.off()
+
+saf_long[, average_age := sy - year]
+m_parent = feols(log(pca + 1) ~ csw(parent_of_con, average_age) | decade + firstrol, data = saf_long)
+m_couple = feols(log(pca + 1) ~ scvw(con, average_age) | decade + firstrol, data = saf_long)
+m_offspr = feols(log(pca + 1) ~ scvw(child_of_con, average_age) | decade + firstrol, data = saf_long)
+etable(m_parent, m_couple, m_offspr)
+etable(m_parent, m_couple, m_offspr, tex = TRUE, digits = 3)
 
 # gradients
 
