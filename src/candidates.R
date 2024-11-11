@@ -7,32 +7,61 @@ library("stringi")
 options(sd_num_thread = 8)
 setDTthreads(8)
 
-# setwd("~/data/cape/opg/")
+setwd("~/data/cape/opg/")
 
-saf = fread("../saf4spouselinkage_full_clean.csv",
+saf = fread("../saf/saf4spouselinkage_full_clean.csv",
     na.string = "")
 
-opg = fread("gunzip -c ../opgaafrol_all_linked_20220220.csv.gz",
+# opg = fread("gunzip -c ../opgaafrol_all_linked_20220220.csv.gz",
+#     na.string = "")
+opg = fread("stellenbosch_long_linked_graphs.csv",
     na.string = "")
+
+opg[, mlast_woprefix := mlast]
+opg[, mlast := paste(mvoor, mlast)]
+opg[, mlast := stringi::stri_trim_both(mlast)]
+opg[, wlast_woprefix := wlast]
+opg[, wlast := paste(wvoor, wlast)]
+opg[, wlast := stringi::stri_trim_both(wlast)]
+opg[opg == ""] = NA
+
+opg[, rol := "stel-long"]
 
 opg[, persid := stri_join(rol, "_", persid)]
 opg[, idx := stri_join(rol, "_", index)]
-opg[, wifepresent := as.logical(wifepresent)]
-opg[, wineproducer := as.logical(wineproducer)]
+opg[, wifepresent := !is.na(names_women_clean)]
+# opg[, wineproducer := as.logical(wineproducer)]
 
 opg = opg[,
     list(
-        rol, year = as.integer(year), persid, idx, nr, districtall,
-        mlast, mfirst, mlast_woprefix, mprefix, minitials,
-        wlast, wfirst, wlast_woprefix, wprefix, winitials,
-        wineproducer, old, young, wifepresent,
-        spousenamedist = as.numeric(spousenamedist),
-        namefreq = as.integer(namefreq),
-        mfirst_uniqueness = as.numeric(mfirst_uniqueness),
-        mfirst_cos_uniqueness = as.numeric(mfirst_cos_uniqueness),
-        settlerchildren = as.numeric(settlerchildren),
-        settlermen = as.integer(settlermen),
-        settlerwomen = as.integer(settlerwomen))]
+        rol,
+        year = as.integer(year),
+        persid,
+        idx,
+        nr,
+        # districtall,
+        mlast,
+        mfirst,
+        # mlast_woprefix,
+        # mprefix,
+        minitials,
+        wlast,
+        wfirst,
+        # wlast_woprefix,
+        # wprefix,
+        winitials,
+        # wineproducer,
+        old,
+        young,
+        wifepresent,
+        # spousenamedist = as.numeric(spousenamedist),
+        # namefreq = as.integer(namefreq),
+        # mfirst_uniqueness = as.numeric(mfirst_uniqueness),
+        # mfirst_cos_uniqueness = as.numeric(mfirst_cos_uniqueness),
+        settlerchildren = as.numeric(settler_children),
+        # settlermen = as.integer(settler_men),
+        # settlerwomen = as.integer(settler_women),
+        NULL)]
 
 opg = rapply(opg, tolower, classes = "character", how = "replace")
 # id idn year old young are duplicated columns, so drop
@@ -58,9 +87,12 @@ opg = rapply(opg, tolower, classes = "character", how = "replace")
 # nb that usually, but not always the man is the mlast
 fill = list()
 
-for (i in 1700:1824){
+# gaps in years now, so get unique years first
+years = saf[sy <= 1826 & gender == 1, sort(unique(sy))]
+
+for (i in years){
     gc()
-    tolink = saf[sy == i & gender == 1, 
+    tolink_saf = saf[sy == i & gender == 1, 
                 list(
                     couple_id, # individual_id, family_id,
                     surname,
@@ -74,11 +106,14 @@ for (i in 1700:1824){
                     deathyear,
                     marriage)]
 
-    cat(i, "-- linking", nrow(tolink), "couples ")
+    tolink_opg = opg[between(year, i + 16, i + 100)]
 
+    cat(i, "-- linking", nrow(tolink_saf), "couples ")
+
+    # issue: this fails if nrow = 1 (dim problem) or 1 individual married multiple times (apply returns data frame/matrix instead of list)
     fill[[as.character(i)]] <- capelinker::candidates(
-        tolink,
-        opg,
+        dat_from = tolink_saf,
+        dat_to = tolink_opg,
         idvariable_from = "couple_id", # rename on the fly?
         idvariable_to = "persid",
         blockvariable_from = "surname",
@@ -93,7 +128,10 @@ for (i in 1700:1824){
 gc()
 cnd = rbindlist(fill, id = "linkvariable")
 gc()
-fwrite(cnd, "saf2opg_candidates_1700_1824.csv")
+fwrite(cnd, "saf2opg_candidates_1600_1824.csv")
+
+# pretoriusa2_mar_1
+# stel-long_1284
 
 # candidates for training data
 
